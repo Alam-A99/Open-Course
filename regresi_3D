@@ -1,0 +1,321 @@
+# ============================================================
+# FISCAL ECONOMETRIC LAB — MAKASSAR 2014–2024
+# ============================================================
+
+# 1. IMPORT LIBRARY
+import pandas as pd
+import numpy as np
+import statsmodels.api as sm
+import matplotlib.pyplot as plt
+import seaborn as sns
+import plotly.graph_objects as go
+import ipywidgets as widgets
+
+from IPython.display import display, clear_output
+from statsmodels.stats.outliers_influence import variance_inflation_factor
+from statsmodels.stats.diagnostic import het_breuschpagan, het_white
+from statsmodels.stats.stattools import jarque_bera, durbin_watson
+from scipy import stats
+
+pd.set_option("display.max_columns", None)
+pd.set_option("display.float_format", lambda x: f"{x:,.4f}")
+
+
+# 2. BACA DATASET
+url = "https://raw.githubusercontent.com/Alam-A99/DATAAKSI/refs/heads/main/dataset_fiskal_97_hipoFull.csv"
+data = pd.read_csv(url)
+
+print(f"Dataset : {data.shape[0]:,} baris × {data.shape[1]:,} kolom")
+
+
+# 3. FILTER MAKASSAR 2014–2024
+makassar = data[
+    data["Kota"].astype(str).str.strip().str.lower().eq("kota makassar") &
+    data["Tahun"].between(2014, 2024)
+].copy()
+
+print(f"Makassar : {len(makassar)} observasi")
+display(makassar)
+
+
+# 4. VARIABEL MODEL
+Y = "KEMISKINAN"
+X_vars = ["bm_pendidikan", "bm_kesehatan", "bm_infrastruktur"]
+
+model_data = makassar[["Tahun", Y] + X_vars].dropna().copy()
+
+print("\nMissing Value:")
+display(model_data.isna().sum().to_frame("Missing"))
+
+print("\nDescriptive Statistics:")
+display(model_data.describe().T)
+
+
+# 5. OLS
+X = sm.add_constant(model_data[X_vars])
+y = model_data[Y]
+
+model = sm.OLS(y, X).fit()
+
+print("\n" + "="*75)
+print("OLS REGRESSION — KEMISKINAN MAKASSAR")
+print("="*75)
+print(model.summary())
+
+
+# 6. TABEL KOEFISIEN
+coef = pd.DataFrame({
+    "Coefficient": model.params,
+    "Std Error": model.bse,
+    "t-stat": model.tvalues,
+    "p-value": model.pvalues,
+    "CI Lower": model.conf_int()[0],
+    "CI Upper": model.conf_int()[1]
+})
+
+print("\nTABEL KOEFISIEN")
+display(coef)
+
+
+# 7. PREDIKSI & RESIDUAL
+model_data["Predicted"] = model.predict(X)
+model_data["Residual"] = model_data[Y] - model_data["Predicted"]
+
+print("\nACTUAL VS PREDICTED")
+display(model_data)
+
+
+# 8. VIF
+X_vif = sm.add_constant(model_data[X_vars])
+
+vif = pd.DataFrame({
+    "Variable": X_vif.columns,
+    "VIF": [
+        variance_inflation_factor(X_vif.values, i)
+        for i in range(X_vif.shape[1])
+    ]
+})
+
+print("\nVIF")
+display(vif)
+
+
+# 9. UJI ASUMSI KLASIK
+bp = het_breuschpagan(model.resid, model.model.exog)
+white = het_white(model.resid, model.model.exog)
+jb = jarque_bera(model.resid)
+dw = durbin_watson(model.resid)
+shapiro = stats.shapiro(model.resid)
+
+diagnostic = pd.DataFrame({
+    "Test": [
+        "Breusch-Pagan",
+        "White",
+        "Jarque-Bera",
+        "Shapiro-Wilk",
+        "Durbin-Watson"
+    ],
+    "Statistic": [
+        bp[0], white[0], jb[0], shapiro.statistic, dw
+    ],
+    "p-value": [
+        bp[1], white[1], jb[1], shapiro.pvalue, np.nan
+    ]
+})
+
+print("\nUJI DIAGNOSTIK")
+display(diagnostic)
+
+
+# 10. CORRELATION MATRIX
+plt.figure(figsize=(7, 5))
+sns.heatmap(
+    model_data[[Y] + X_vars].corr(),
+    annot=True,
+    fmt=".2f",
+    cmap="coolwarm",
+    center=0
+)
+plt.title("Correlation Matrix — Makassar")
+plt.tight_layout()
+plt.show()
+
+
+# 11. ACTUAL VS PREDICTED
+plt.figure(figsize=(10, 5))
+plt.plot(model_data["Tahun"], model_data[Y], "o-", label="Actual")
+plt.plot(model_data["Tahun"], model_data["Predicted"], "s--", label="Predicted")
+plt.xlabel("Tahun")
+plt.ylabel(Y)
+plt.title("Actual vs Predicted — Makassar 2014–2024")
+plt.legend()
+plt.grid(alpha=.3)
+plt.tight_layout()
+plt.show()
+
+
+# 12. RESIDUAL VS FITTED
+plt.figure(figsize=(8, 5))
+sns.scatterplot(x=model.fittedvalues, y=model.resid, s=80)
+plt.axhline(0, linestyle="--")
+plt.xlabel("Fitted Values")
+plt.ylabel("Residual")
+plt.title("Residual vs Fitted")
+plt.tight_layout()
+plt.show()
+
+
+# 13. Q-Q PLOT
+sm.qqplot(model.resid, line="45", fit=True)
+plt.title("Q-Q Plot Residual")
+plt.tight_layout()
+plt.show()
+
+
+# ============================================================
+# 14. 3D REGRESSION PLANE — INTERACTIVE
+# ============================================================
+
+available = [
+    "KEMISKINAN",
+    "bm_pendidikan",
+    "bm_kesehatan",
+    "bm_perumahan",
+    "bm_lingkungan",
+    "bm_ekonomi",
+    "bm_infrastruktur",
+    "bm_pariwisata",
+    "bm_perlindungan_sosial"
+]
+
+available = [v for v in available if v in model_data.columns]
+
+Y_select = widgets.Dropdown(
+    options=available,
+    value="KEMISKINAN",
+    description="Y:",
+    layout=widgets.Layout(width="300px")
+)
+
+X1_select = widgets.Dropdown(
+    options=available,
+    value="bm_pendidikan",
+    description="X1:",
+    layout=widgets.Layout(width="300px")
+)
+
+X2_select = widgets.Dropdown(
+    options=available,
+    value="bm_kesehatan",
+    description="X2:",
+    layout=widgets.Layout(width="300px")
+)
+
+run3d = widgets.Button(
+    description="▶ Tampilkan 3D",
+    button_style="primary"
+)
+
+out3d = widgets.Output()
+
+
+def plot3d(_=None):
+
+    with out3d:
+        clear_output(wait=True)
+
+        Y3 = Y_select.value
+        X1 = X1_select.value
+        X2 = X2_select.value
+
+        if len({Y3, X1, X2}) < 3:
+            print("⚠️ Y, X1, dan X2 harus berbeda.")
+            return
+
+        d = model_data[["Tahun", Y3, X1, X2]].dropna()
+
+        X = sm.add_constant(d[[X1, X2]])
+        m = sm.OLS(d[Y3], X).fit()
+
+        b0, b1, b2 = m.params
+
+        # Regression plane
+        x1 = np.linspace(d[X1].min(), d[X1].max(), 30)
+        x2 = np.linspace(d[X2].min(), d[X2].max(), 30)
+        X1g, X2g = np.meshgrid(x1, x2)
+        Yg = b0 + b1*X1g + b2*X2g
+
+        fig = go.Figure()
+
+        # Observations
+        fig.add_trace(go.Scatter3d(
+            x=d[X1],
+            y=d[X2],
+            z=d[Y3],
+            mode="markers+text",
+            text=d["Tahun"],
+            textposition="top center",
+            marker=dict(size=7),
+            name="Observasi",
+            hovertemplate=(
+                "Tahun: %{text}<br>" +
+                f"{X1}: %{{x:,.3f}}<br>" +
+                f"{X2}: %{{y:,.3f}}<br>" +
+                f"{Y3}: %{{z:,.3f}}<extra></extra>"
+            )
+        ))
+
+        # Regression plane
+        fig.add_trace(go.Surface(
+            x=X1g,
+            y=X2g,
+            z=Yg,
+            opacity=.55,
+            showscale=False,
+            name="Regression Plane"
+        ))
+
+        equation = (
+            f"{Y3} = {b0:.4f} "
+            f"+ ({b1:.4f}) {X1} "
+            f"+ ({b2:.4f}) {X2}"
+        )
+
+        fig.update_layout(
+            title=f"<b>3D Regression Plane — Makassar</b><br>"
+                  f"<sup>{equation}</sup>",
+            scene=dict(
+                xaxis_title=X1,
+                yaxis_title=X2,
+                zaxis_title=Y3
+            ),
+            height=700
+        )
+
+        fig.show()
+
+        print("\nMODEL 3D")
+        print(equation)
+        print(f"R²       : {m.rsquared:.4f}")
+        print(f"Adj. R² : {m.rsquared_adj:.4f}")
+        print(f"F-stat   : {m.fvalue:.4f}")
+        print(f"F p-value: {m.f_pvalue:.4f}")
+
+        display(pd.DataFrame({
+            "Coefficient": m.params,
+            "Std Error": m.bse,
+            "t-stat": m.tvalues,
+            "p-value": m.pvalues
+        }))
+
+
+run3d.on_click(plot3d)
+
+display(
+    widgets.VBox([
+        widgets.HTML("<h3>📐 3D Fiscal Regression Explorer</h3>"),
+        widgets.HBox([Y_select, X1_select, X2_select]),
+        run3d,
+        out3d
+    ])
+)
