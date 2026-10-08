@@ -173,11 +173,29 @@ plt.show()
 
 
 # ============================================================
-# 14. 3D REGRESSION PLANE — INTERACTIVE
+# 14. 3D FISCAL REGRESSION EXPLORER
 # ============================================================
 
-available = [
+# Variabel Y yang dapat dianalisis
+Y_3D = [
     "KEMISKINAN",
+    "PENGANGGURAN",
+    "KETIMPANGAN",
+    "IPM",
+    "PE"
+]
+
+# Variabel X yang dapat dipilih
+X_3D = [
+    "DBH_PAJAK",
+    "DBH_SDA",
+    "DBH_Lainnya",
+    "DAU_Grant",
+    "DAU_Earmark",
+    "DAK_Fisik",
+    "DAK_Nonfisik",
+    "PAD",
+    "ICT",
     "bm_pendidikan",
     "bm_kesehatan",
     "bm_perumahan",
@@ -188,134 +206,349 @@ available = [
     "bm_perlindungan_sosial"
 ]
 
-available = [v for v in available if v in model_data.columns]
+# Hanya tampilkan variabel yang benar-benar ada di dataset
+Y_3D = [v for v in Y_3D if v in makassar.columns]
+X_3D = [v for v in X_3D if v in makassar.columns]
+
+
+# ============================================================
+# WIDGET
+# ============================================================
 
 Y_select = widgets.Dropdown(
-    options=available,
-    value="KEMISKINAN",
+    options=Y_3D,
+    value="KEMISKINAN" if "KEMISKINAN" in Y_3D else Y_3D[0],
     description="Y:",
     layout=widgets.Layout(width="300px")
 )
 
 X1_select = widgets.Dropdown(
-    options=available,
-    value="bm_pendidikan",
+    options=X_3D,
+    value="bm_pendidikan" if "bm_pendidikan" in X_3D else X_3D[0],
     description="X1:",
-    layout=widgets.Layout(width="300px")
+    layout=widgets.Layout(width="330px")
 )
 
 X2_select = widgets.Dropdown(
-    options=available,
-    value="bm_kesehatan",
+    options=X_3D,
+    value="bm_kesehatan" if "bm_kesehatan" in X_3D else X_3D[1],
     description="X2:",
-    layout=widgets.Layout(width="300px")
+    layout=widgets.Layout(width="330px")
 )
 
 run3d = widgets.Button(
     description="▶ Tampilkan 3D",
-    button_style="primary"
+    button_style="primary",
+    layout=widgets.Layout(width="180px")
 )
 
 out3d = widgets.Output()
 
 
+# ============================================================
+# FUNCTION 3D
+# ============================================================
+
 def plot3d(_=None):
 
     with out3d:
+
         clear_output(wait=True)
 
-        Y3 = Y_select.value
+        Y = Y_select.value
         X1 = X1_select.value
         X2 = X2_select.value
 
-        if len({Y3, X1, X2}) < 3:
-            print("⚠️ Y, X1, dan X2 harus berbeda.")
+        # ----------------------------------------------------
+        # VALIDASI
+        # ----------------------------------------------------
+
+        if X1 == X2:
+            print("⚠️ X1 dan X2 harus berbeda.")
             return
 
-        d = model_data[["Tahun", Y3, X1, X2]].dropna()
+        required = ["Tahun", Y, X1, X2]
 
-        X = sm.add_constant(d[[X1, X2]])
-        m = sm.OLS(d[Y3], X).fit()
+        missing = [
+            v for v in required
+            if v not in makassar.columns
+        ]
 
-        b0, b1, b2 = m.params
+        if missing:
+            print(
+                "⚠️ Variabel tidak ditemukan:",
+                missing
+            )
+            return
 
-        # Regression plane
-        x1 = np.linspace(d[X1].min(), d[X1].max(), 30)
-        x2 = np.linspace(d[X2].min(), d[X2].max(), 30)
-        X1g, X2g = np.meshgrid(x1, x2)
-        Yg = b0 + b1*X1g + b2*X2g
+        # ----------------------------------------------------
+        # DATA
+        # ----------------------------------------------------
+
+        d = makassar[
+            required
+        ].dropna().copy()
+
+        if len(d) < 4:
+            print(
+                "⚠️ Observasi tidak cukup "
+                "untuk membangun model 3D."
+            )
+            return
+
+        # ----------------------------------------------------
+        # OLS 3D
+        # Y = β0 + β1X1 + β2X2
+        # ----------------------------------------------------
+
+        X = sm.add_constant(
+            d[[X1, X2]]
+        )
+
+        y = d[Y]
+
+        m = sm.OLS(
+            y,
+            X
+        ).fit()
+
+        b0 = m.params["const"]
+        b1 = m.params[X1]
+        b2 = m.params[X2]
+
+        # ----------------------------------------------------
+        # REGRESSION PLANE
+        # ----------------------------------------------------
+
+        x1_range = np.linspace(
+            d[X1].min(),
+            d[X1].max(),
+            40
+        )
+
+        x2_range = np.linspace(
+            d[X2].min(),
+            d[X2].max(),
+            40
+        )
+
+        X1_grid, X2_grid = np.meshgrid(
+            x1_range,
+            x2_range
+        )
+
+        Y_grid = (
+            b0
+            + b1 * X1_grid
+            + b2 * X2_grid
+        )
+
+        # ----------------------------------------------------
+        # FIGURE
+        # ----------------------------------------------------
 
         fig = go.Figure()
 
-        # Observations
-        fig.add_trace(go.Scatter3d(
-            x=d[X1],
-            y=d[X2],
-            z=d[Y3],
-            mode="markers+text",
-            text=d["Tahun"],
-            textposition="top center",
-            marker=dict(size=7),
-            name="Observasi",
-            hovertemplate=(
-                "Tahun: %{text}<br>" +
-                f"{X1}: %{{x:,.3f}}<br>" +
-                f"{X2}: %{{y:,.3f}}<br>" +
-                f"{Y3}: %{{z:,.3f}}<extra></extra>"
+        # OBSERVASI
+        fig.add_trace(
+            go.Scatter3d(
+                x=d[X1],
+                y=d[X2],
+                z=d[Y],
+
+                mode="markers+text",
+
+                text=d["Tahun"],
+
+                textposition="top center",
+
+                marker=dict(
+                    size=8,
+                    opacity=0.9
+                ),
+
+                name="Observasi",
+
+                hovertemplate=(
+                    "<b>Tahun:</b> %{text}<br>"
+                    f"<b>{X1}:</b> %{{x:,.3f}}<br>"
+                    f"<b>{X2}:</b> %{{y:,.3f}}<br>"
+                    f"<b>{Y}:</b> %{{z:,.3f}}"
+                    "<extra></extra>"
+                )
             )
-        ))
-
-        # Regression plane
-        fig.add_trace(go.Surface(
-            x=X1g,
-            y=X2g,
-            z=Yg,
-            opacity=.55,
-            showscale=False,
-            name="Regression Plane"
-        ))
-
-        equation = (
-            f"{Y3} = {b0:.4f} "
-            f"+ ({b1:.4f}) {X1} "
-            f"+ ({b2:.4f}) {X2}"
         )
 
+        # REGRESSION PLANE
+        fig.add_trace(
+            go.Surface(
+                x=X1_grid,
+                y=X2_grid,
+                z=Y_grid,
+
+                opacity=0.55,
+
+                showscale=False,
+
+                name="Regression Plane",
+
+                hovertemplate=(
+                    f"<b>{X1}:</b> %{{x:,.3f}}<br>"
+                    f"<b>{X2}:</b> %{{y:,.3f}}<br>"
+                    f"<b>Predicted {Y}:</b> %{{z:,.3f}}"
+                    "<extra>Regression Plane</extra>"
+                )
+            )
+        )
+
+        # ----------------------------------------------------
+        # PERSAMAAN
+        # ----------------------------------------------------
+
+        sign1 = "+" if b1 >= 0 else "-"
+        sign2 = "+" if b2 >= 0 else "-"
+
+        equation = (
+            f"{Y} = {b0:.4f} "
+            f"{sign1} {abs(b1):.4f}({X1}) "
+            f"{sign2} {abs(b2):.4f}({X2})"
+        )
+
+        # ----------------------------------------------------
+        # LAYOUT
+        # ----------------------------------------------------
+
         fig.update_layout(
-            title=f"<b>3D Regression Plane — Makassar</b><br>"
-                  f"<sup>{equation}</sup>",
-            scene=dict(
-                xaxis_title=X1,
-                yaxis_title=X2,
-                zaxis_title=Y3
+
+            title=dict(
+                text=(
+                    "<b>3D Fiscal Regression Plane — "
+                    "Kota Makassar</b>"
+                    f"<br><sup>{equation}</sup>"
+                ),
+                x=0.5
             ),
-            height=700
+
+            scene=dict(
+
+                xaxis=dict(
+                    title=f"<b>{X1}</b>"
+                ),
+
+                yaxis=dict(
+                    title=f"<b>{X2}</b>"
+                ),
+
+                zaxis=dict(
+                    title=f"<b>{Y}</b>"
+                ),
+
+                camera=dict(
+                    eye=dict(
+                        x=1.5,
+                        y=1.5,
+                        z=1.2
+                    )
+                )
+            ),
+
+            height=720,
+
+            margin=dict(
+                l=0,
+                r=0,
+                b=0,
+                t=100
+            )
         )
 
         fig.show()
 
-        print("\nMODEL 3D")
+        # ----------------------------------------------------
+        # MODEL SUMMARY
+        # ----------------------------------------------------
+
+        print("\n" + "=" * 75)
+        print("3D FISCAL REGRESSION MODEL")
+        print("=" * 75)
+
+        print(f"\nDependent Variable : {Y}")
+        print(f"X1                 : {X1}")
+        print(f"X2                 : {X2}")
+
+        print("\nPersamaan:")
         print(equation)
-        print(f"R²       : {m.rsquared:.4f}")
-        print(f"Adj. R² : {m.rsquared_adj:.4f}")
-        print(f"F-stat   : {m.fvalue:.4f}")
-        print(f"F p-value: {m.f_pvalue:.4f}")
 
-        display(pd.DataFrame({
+        print("\nModel Fit:")
+        print(f"R²                 : {m.rsquared:.4f}")
+        print(f"Adjusted R²        : {m.rsquared_adj:.4f}")
+        print(f"F-statistic        : {m.fvalue:.4f}")
+        print(f"Prob(F-statistic)  : {m.f_pvalue:.4f}")
+        print(f"Observations       : {int(m.nobs)}")
+
+        # ----------------------------------------------------
+        # COEFFICIENT TABLE
+        # ----------------------------------------------------
+
+        coef3d = pd.DataFrame({
+
             "Coefficient": m.params,
-            "Std Error": m.bse,
-            "t-stat": m.tvalues,
-            "p-value": m.pvalues
-        }))
 
+            "Std Error": m.bse,
+
+            "t-stat": m.tvalues,
+
+            "p-value": m.pvalues,
+
+            "CI Lower": m.conf_int()[0],
+
+            "CI Upper": m.conf_int()[1]
+
+        }).round(4)
+
+        print("\nKoefisien Model 3D:")
+
+        display(coef3d)
+
+
+# ============================================================
+# BUTTON
+# ============================================================
 
 run3d.on_click(plot3d)
 
+
+# ============================================================
+# DISPLAY INTERFACE
+# ============================================================
+
 display(
+
     widgets.VBox([
-        widgets.HTML("<h3>📐 3D Fiscal Regression Explorer</h3>"),
-        widgets.HBox([Y_select, X1_select, X2_select]),
-        run3d,
+
+        widgets.HTML(
+            """
+            <h2 style="margin-bottom:4px;">
+            📐 3D Fiscal Regression Explorer
+            </h2>
+
+            <p style="margin-top:0;">
+            <b>Kota Makassar | 2014–2024</b><br>
+            Pilih satu variabel Y dan dua variabel X
+            untuk membentuk regression plane.
+            </p>
+            """
+        ),
+
+        widgets.HBox([
+            Y_select,
+            X1_select,
+            X2_select,
+            run3d
+        ]),
+
         out3d
+
     ])
+
 )
